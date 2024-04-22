@@ -611,9 +611,6 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
         .module(frag_shader_module)
         .name(b"main\0");
 
-    device.destroy_shader_module(vert_shader_module, None);
-    device.destroy_shader_module(frag_shader_module, None);
-
     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder();
 
     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
@@ -690,6 +687,9 @@ unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
     data.pipeline = device
         .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
         .0[0];
+
+    device.destroy_shader_module(vert_shader_module, None);
+    device.destroy_shader_module(frag_shader_module, None);
 
     Ok(())
 }
