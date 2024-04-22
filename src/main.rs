@@ -70,6 +70,7 @@ fn main() -> Result<()> {
                     unsafe { app.device.device_wait_idle().unwrap(); }
                     unsafe { app.destroy(); }
                 }
+                WindowEvent::Resized(_) => app.resized = true,
                 _ => {}
             }
             _ => {}
@@ -87,6 +88,7 @@ struct App {
     data: AppData,
     device: Device,
     frame: usize,
+    resized: bool,
 }
 
 impl App {
@@ -113,7 +115,24 @@ impl App {
             data,
             device,
             frame: 0,
+            resized: false
         })
+    }
+
+    unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
+        self.device.device_wait_idle()?;
+
+        create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
+        create_swapchain_image_views(&self.device, &mut self.data)?;
+        create_render_pass(&self.instance, &self.device, &mut self.data)?;
+        create_pipeline(&self.device, &mut self.data)?;
+        create_framebuffers(&self.device, &mut self.data)?;
+        create_command_buffers(&self.device, &mut self.data)?;
+        self.data
+            .images_in_flight
+            .resize(self.data.swapchain_images.len(), vk::Fence::null());
+
+        Ok(())
     }
 
     /// Renders a frame for our Vulkan app.
@@ -121,15 +140,20 @@ impl App {
         self.device
             .wait_for_fences(&[self.data.in_flight_fences[self.frame]], true, u64::MAX)?;
 
-        let image_index = self
+        let result = self
             .device
             .acquire_next_image_khr(
                 self.data.swapchain,
                 u64::MAX,
                 self.data.image_available_semaphores[self.frame],
                 vk::Fence::null(),
-            )?
-            .0 as usize;
+            );
+
+        let image_index = match result {
+            Ok((image_index, _)) => image_index as usize,
+            Err(vk::ErrorCode::OUT_OF_DATE_KHR) => return self.recreate_swapchain(window),
+            Err(e) => return Err(anyhow!(e)),
+        };
 
         if !self.data.images_in_flight[image_index as usize].is_null() {
             self.device.wait_for_fences(
@@ -168,8 +192,18 @@ impl App {
             .swapchains(swapchains)
             .image_indices(image_indices);
 
-        self.device
-            .queue_present_khr(self.data.present_queue, &present_info)?;
+        let result = self.device
+            .queue_present_khr(self.data.present_queue, &present_info);
+
+        let changed = result == Ok(vk::SuccessCode::SUBOPTIMAL_KHR)
+            || result == Err(vk::ErrorCode::OUT_OF_DATE_KHR);
+        
+        if self.resized || changed {
+            self.resized  = false;
+            self.recreate_swapchain(window)?;
+        }else if let Err(e) = result {
+            return Err(anyhow!(e));
+        }
 
         self.frame = (self.frame + 1) % MAX_FRAMES_IN_FLIGHT;
 
@@ -179,6 +213,9 @@ impl App {
     /// Destroys our Vulkan app.
     #[rustfmt::skip]
     unsafe fn destroy(&mut self) {
+
+        self.destroy_swapchain();
+
         self.data.image_available_semaphores
             .iter()
             .for_each(|s|{
@@ -194,11 +231,23 @@ impl App {
             .for_each(|f|{
                 self.device.destroy_fence(*f, None);
             });
+        self.device.destroy_command_pool(self.data.command_pool, None);        
+        self.device.destroy_device(None);
+        self.instance.destroy_surface_khr(self.data.surface, None);
 
-        self.device.destroy_command_pool(self.data.command_pool, None);
+        if VALIDATION_ENABLED {
+            self.instance.destroy_debug_utils_messenger_ext(self.data.messenger, None);
+        }
+
+        self.instance.destroy_instance(None);
+    }
+
+
+    unsafe fn destroy_swapchain(&mut self){
         self.data.framebuffers
             .iter()
             .for_each(|f| self.device.destroy_framebuffer(*f, None));
+        self.device.free_command_buffers(self.data.command_pool, &self.data.command_buffers);
         self.device.destroy_pipeline(self.data.pipeline, None);
         self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);
         self.device.destroy_render_pass(self.data.render_pass, None);
@@ -206,14 +255,6 @@ impl App {
             .iter()
             .for_each(|v| self.device.destroy_image_view(*v, None));
         self.device.destroy_swapchain_khr(self.data.swapchain, None);
-        self.instance.destroy_surface_khr(self.data.surface, None);
-        self.device.destroy_device(None);
-
-        if VALIDATION_ENABLED {
-            self.instance.destroy_debug_utils_messenger_ext(self.data.messenger, None);
-        }
-
-        self.instance.destroy_instance(None);
     }
 }
 
