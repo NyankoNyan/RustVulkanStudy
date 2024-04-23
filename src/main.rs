@@ -216,6 +216,17 @@ impl App {
 
         let changed = result == Ok(vk::SuccessCode::SUBOPTIMAL_KHR)
             || result == Err(vk::ErrorCode::OUT_OF_DATE_KHR);
+
+        if self.resized {
+            // Is resize realy needed
+            let support = 
+                SwapchainSupport::get(&self.instance, &self.data, self.data.physical_device)?;
+            let new_extent = get_swapchain_extent(window, support.capabilities);
+            if self.data.swapchain_extent.width == new_extent.width
+                && self.data.swapchain_extent.height == new_extent.height{
+                    self.resized = false;
+                }
+        }
         
         if self.resized || changed {
             self.resized  = false;
@@ -367,8 +378,11 @@ unsafe fn create_instance(window: &Window, entry: &Entry, data: &mut AppData) ->
         extensions.push(vk::EXT_DEBUG_UTILS_EXTENSION.name.as_ptr());
     }
 
-    // Create
+    layers.iter().for_each(|l| info!("Layer choosed: {}", vk::StringArray::<255>::from_ptr(*l)));
+    extensions.iter().for_each(|e| info!("Extension choosed: {}", vk::StringArray::<255>::from_ptr(*e)));
+    info!("Instance flags: {}", flags.bits());
 
+    // Create
     let mut info = vk::InstanceCreateInfo::builder()
         .application_info(&application_info)
         .enabled_layer_names(&layers)
@@ -464,16 +478,16 @@ unsafe fn check_physical_device(
     }
 
     //Debug
-    for v in support.formats.iter() {
+    support.formats.iter().for_each(|v| {
         info!(
             "Available Format: {:?}, Color space: {:?}",
             v.format, v.color_space
-        );
-    }
+        )
+    });
 
-    for v in support.present_modes.iter() {
+    support.present_modes.iter().for_each(|v| {
         info!("Available present mode: {:?}", v);
-    }
+    });
 
     Ok(())
 }
@@ -517,6 +531,7 @@ unsafe fn create_logical_device(
     let queue_infos = unique_indices
         .iter()
         .map(|i| {
+            info!("Queue index: {}", *i); // Debug
             vk::DeviceQueueCreateInfo::builder()
                 .queue_family_index(*i)
                 .queue_priorities(queue_priorities)
@@ -546,8 +561,11 @@ unsafe fn create_logical_device(
 
     let features = vk::PhysicalDeviceFeatures::builder();
 
-    // Create
+    // Debug
+    layers.iter().for_each(|l| info!("Logical device layer: {}", vk::StringArray::<255>::from_ptr(*l)));
+    extensions.iter().for_each(|e| info!("Logical device extension: {}", vk::StringArray::<255>::from_ptr(*e)));
 
+    // Create
     let info = vk::DeviceCreateInfo::builder()
         .queue_create_infos(&queue_infos)
         .enabled_layer_names(&layers)
@@ -557,9 +575,12 @@ unsafe fn create_logical_device(
     let device = instance.create_device(data.physical_device, &info, None)?;
 
     // Queues
-
     data.graphics_queue = device.get_device_queue(indices.graphics, 0);
     data.present_queue = device.get_device_queue(indices.present, 0);
+
+    // Debug
+    info!("Graphics queue: {:?}", data.graphics_queue);
+    info!("Present queue: {:?}", data.present_queue);
 
     Ok(device)
 }
@@ -685,6 +706,7 @@ unsafe fn create_swapchain(
     let surface_format = get_swapchain_surface_format(&support.formats);
     let present_mode = get_swapchain_present_mode(&support.present_modes);
     let extent = get_swapchain_extent(window, support.capabilities);
+    info!("Default extent: {:?}", extent);
 
     let mut image_count = support.capabilities.min_image_count + 1;
     if support.capabilities.max_image_count != 0
