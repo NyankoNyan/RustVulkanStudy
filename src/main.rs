@@ -2128,8 +2128,7 @@ unsafe fn generate_mipmaps(
         .image(image)
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .subresource_range(subresource)
-        .build();
+        .subresource_range(subresource);
 
     let mut mip_width = width;
     let mut mip_height = height;
@@ -2191,6 +2190,21 @@ unsafe fn generate_mipmaps(
             vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             &[blit],
             vk::Filter::LINEAR,
+        );
+
+        barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+        barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+        barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+
+        device.cmd_pipeline_barrier(
+            command_buffer,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+            vk::DependencyFlags::empty(),
+            &[] as &[vk::MemoryBarrier],
+            &[] as &[vk::BufferMemoryBarrier],
+            &[barrier],
         );
 
         if mip_width > 1 {
